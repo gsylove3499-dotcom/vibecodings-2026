@@ -1,0 +1,538 @@
+// 맞춰야 할 과일 후보 목록입니다.
+// 가장 큰 보드(6x6) 기준으로 충분한 개수를 넣어 둡니다.
+const fruit_pool = [
+  "🍇", "🍓", "🥝", "🍑",
+  "🍎", "🍉", "🍒", "🍊",
+  "🍐", "🍋", "🍌", "🍍",
+  "🥭", "🍈", "🫐", "🍏",
+  "🍅", "🥥",
+];
+
+// 난이도별 보드 크기와 프리뷰 속도를 함께 관리합니다.
+const stage_order = ["easy", "medium", "medium1", "medium2", "hard"];
+
+const level_config_map = {
+  easy: {
+    label: "쉬움",
+    grid_size: 3,
+    time_limit_sec: 90,
+    preview_duration_ms: 1700,
+    preview_step_ms: 110,
+  },
+  medium: {
+    label: "중간",
+    grid_size: 4,
+    time_limit_sec: 75,
+    preview_duration_ms: 1500,
+    preview_step_ms: 95,
+  },
+  medium1: {
+    label: "중간1",
+    grid_size: 5,
+    time_limit_sec: 60,
+    preview_duration_ms: 1350,
+    preview_step_ms: 80,
+  },
+  medium2: {
+    label: "중간2",
+    grid_size: 6,
+    time_limit_sec: 45,
+    preview_duration_ms: 1200,
+    preview_step_ms: 70,
+  },
+  hard: {
+    label: "어려움",
+    grid_size: 6,
+    time_limit_sec: 35,
+    preview_duration_ms: 1050,
+    preview_step_ms: 60,
+  },
+};
+
+// 화면에서 사용할 DOM 요소를 미리 찾아 둡니다.
+const board_element = document.getElementById("board");
+const attempt_count_element = document.getElementById("attemptCount");
+const timer_element = document.getElementById("timer");
+const time_remaining_element = document.getElementById("timeRemaining");
+const start_screen_element = document.getElementById("startScreen");
+const end_screen_element = document.getElementById("endScreen");
+const end_screen_message_element = document.getElementById("endScreenMessage");
+const level_select_element = document.getElementById("levelSelect");
+const start_button = document.getElementById("startButton");
+const restart_button = document.getElementById("restartButton");
+const start_screen_button = document.getElementById("startScreenButton");
+const end_screen_button = document.getElementById("endScreenButton");
+const message_element = document.getElementById("message");
+
+// 현재 게임 상태를 저장하는 변수들입니다.
+let first_card = null;
+let second_card = null;
+let board_locked = true;
+let is_game_ready = false;
+let attempt_count = 0;
+let matched_pairs = 0;
+let mismatch_timer_id = null;
+let preview_timer_ids = [];
+let preview_end_timer_id = null;
+let countdown_timer_id = null;
+let stage_transition_timer_id = null;
+let active_fruit_list = [];
+let current_stage_index = 0;
+let current_level_config = get_level_config();
+let time_remaining_sec = 0;
+let is_game_over = false;
+let is_stage_transitioning = false;
+let game_phase = "intro";
+
+function get_level_config(stage_index = current_stage_index) {
+  // 현재 단계에 맞는 설정을 가져옵니다.
+  const stage_key = stage_order[stage_index] ?? stage_order[0];
+  const base_config = level_config_map[stage_key] ?? level_config_map.medium;
+  const total_cell_count = base_config.grid_size * base_config.grid_size;
+
+  return {
+    ...base_config,
+    stage_key,
+    total_cell_count,
+    pair_count: Math.floor(total_cell_count / 2),
+    blank_cell_count: total_cell_count % 2,
+  };
+}
+
+function shuffle_array(array) {
+  // 원본 배열은 건드리지 않기 위해 복사본을 만듭니다.
+  const shuffled_array = [...array];
+
+  // Fisher-Yates 방식으로 배열을 섞습니다.
+  // 이 방식은 sort + Math.random()보다 더 안정적으로 무작위 순서를 만듭니다.
+  for (let index = shuffled_array.length - 1; index > 0; index -= 1) {
+    const random_index = Math.floor(Math.random() * (index + 1));
+    [shuffled_array[index], shuffled_array[random_index]] = [shuffled_array[random_index], shuffled_array[index]];
+  }
+
+  return shuffled_array;
+}
+
+function set_message(text, is_done = false) {
+  // 하단 안내 문구를 바꾸고, 클리어 상태면 강조 스타일을 줍니다.
+  message_element.textContent = text;
+  message_element.classList.toggle("done", is_done);
+}
+
+function reset_selected_cards() {
+  // 한 번의 시도 처리가 끝나면 선택한 카드 정보를 초기화합니다.
+  first_card = null;
+  second_card = null;
+  board_locked = false;
+}
+
+function update_attempt_count() {
+  // 화면에 보이는 시도 횟수를 숫자 상태와 맞춥니다.
+  attempt_count_element.textContent = attempt_count;
+}
+
+function update_time_remaining() {
+  // 남은 시간을 화면과 동기화합니다.
+  time_remaining_element.textContent = time_remaining_sec;
+  timer_element.classList.toggle("warning", time_remaining_sec <= 10);
+}
+
+function stop_countdown_timer() {
+  // 타이머가 중복으로 돌지 않도록 정리합니다.
+  if (countdown_timer_id) {
+    clearInterval(countdown_timer_id);
+    countdown_timer_id = null;
+  }
+}
+
+function start_countdown_timer() {
+  // 프리뷰가 끝난 뒤부터 제한 시간을 카운트합니다.
+  stop_countdown_timer();
+  time_remaining_sec = current_level_config.time_limit_sec;
+  update_time_remaining();
+
+  countdown_timer_id = setInterval(() => {
+    if (is_game_over || !is_game_ready) {
+      return;
+    }
+
+    time_remaining_sec -= 1;
+    update_time_remaining();
+
+    if (time_remaining_sec <= 0) {
+      handle_time_over();
+    }
+  }, 1000);
+}
+
+function update_board_layout() {
+  // 난이도에 따라 보드의 열 개수를 바꿉니다.
+  board_element.style.setProperty("--board-size", current_level_config.grid_size);
+}
+
+function set_game_phase(next_phase) {
+  // 시작 화면, 진행 화면, 종료 화면의 노출을 관리합니다.
+  game_phase = next_phase;
+  start_screen_element.classList.toggle("hidden", next_phase !== "intro");
+  end_screen_element.classList.toggle("hidden", next_phase !== "ended");
+}
+
+function sync_stage_selector() {
+  // 현재 단계를 콤보박스에 표시합니다.
+  level_select_element.value = current_level_config.stage_key;
+}
+
+function clear_all_timers() {
+  // 시작 버튼을 다시 눌렀을 때 이전 타이머가 남아 있으면 예외가 날 수 있으므로 모두 정리합니다.
+  if (mismatch_timer_id) {
+    clearTimeout(mismatch_timer_id);
+    mismatch_timer_id = null;
+  }
+
+  if (preview_end_timer_id) {
+    clearTimeout(preview_end_timer_id);
+    preview_end_timer_id = null;
+  }
+
+  if (stage_transition_timer_id) {
+    clearTimeout(stage_transition_timer_id);
+    stage_transition_timer_id = null;
+  }
+
+  preview_timer_ids.forEach((timer_id) => clearTimeout(timer_id));
+  preview_timer_ids = [];
+  stop_countdown_timer();
+}
+
+function mark_cards_as_matched(first_element, second_element) {
+  // 같은 그림인 카드 2장은 맞춘 상태로 고정합니다.
+  first_element.classList.add("matched");
+  second_element.classList.add("matched");
+  first_element.disabled = true;
+  second_element.disabled = true;
+  matched_pairs += 1;
+}
+
+function is_game_clear() {
+  // 모든 그림 쌍을 맞췄는지 확인합니다.
+  return matched_pairs === current_level_config.pair_count;
+}
+
+function show_clear_message() {
+  // 최종 단계까지 모두 끝냈을 때 보여줄 문구입니다.
+  board_locked = true;
+  is_game_ready = false;
+  is_game_over = true;
+  stop_countdown_timer();
+  set_board_activity(false);
+  set_all_card_disabled(true);
+  set_message(`축하합니다! ${attempt_count}번 만에 모든 단계를 클리어했습니다.`, true);
+  end_screen_message_element.textContent = `모든 단계를 통과했습니다. 총 시도 횟수는 ${attempt_count}번입니다.`;
+  set_game_phase("ended");
+}
+
+function show_game_over_message() {
+  // 시간이 끝났을 때 게임을 종료합니다.
+  clear_all_timers();
+  board_locked = true;
+  is_game_ready = false;
+  is_game_over = true;
+  set_board_activity(false);
+  set_all_card_disabled(true);
+  set_message("시간이 모두 끝났습니다. 게임 오버입니다.");
+}
+
+function advance_to_next_stage() {
+  // 현재 단계를 클리어하면 다음 단계로 자동 이동합니다.
+  is_stage_transitioning = true;
+  board_locked = true;
+  is_game_ready = false;
+  stop_countdown_timer();
+  set_board_activity(false);
+  set_all_card_disabled(true);
+
+  const next_stage_index = current_stage_index + 1;
+  const next_stage_config = get_level_config(next_stage_index);
+
+  set_message(`${current_level_config.label} 클리어! ${next_stage_config.label} 단계로 이동합니다.`, true);
+
+  stage_transition_timer_id = setTimeout(() => {
+    stage_transition_timer_id = null;
+    current_stage_index = next_stage_index;
+    is_stage_transitioning = false;
+    prepare_game(false);
+    start_preview_sequence();
+  }, 1200);
+}
+
+function handle_time_over() {
+  // 제한 시간이 0초가 되면 즉시 종료 상태로 전환합니다.
+  time_remaining_sec = 0;
+  update_time_remaining();
+  show_game_over_message();
+}
+
+function reveal_card(card_element) {
+  // 카드 앞면이 보이도록 뒤집는 역할입니다.
+  card_element.classList.add("flipped");
+}
+
+function hide_card(card_element) {
+  // 맞지 않는 카드 두 장을 다시 뒤집는 역할입니다.
+  // 재시작 직후에는 카드 요소가 없을 수 있으므로 먼저 확인합니다.
+  if (!card_element || !card_element.classList) {
+    return;
+  }
+
+  card_element.classList.remove("flipped");
+}
+
+function compare_cards() {
+  // 두 카드의 data-value가 같으면 같은 그림입니다.
+  return first_card.dataset.value === second_card.dataset.value;
+}
+
+function handle_matched_pair() {
+  // 같은 그림이면 카드들을 맞춘 상태로 표시하고, 턴을 초기화합니다.
+  mark_cards_as_matched(first_card, second_card);
+  set_message("잘 찾았어요! 같은 그림입니다.");
+  reset_selected_cards();
+
+  if (is_game_clear()) {
+    if (current_stage_index >= stage_order.length - 1) {
+      show_clear_message();
+      return;
+    }
+
+    advance_to_next_stage();
+  }
+}
+
+function handle_mismatched_pair() {
+  // 다른 그림이면 잠깐 보여준 뒤 다시 뒤집습니다.
+  set_message("다른 그림입니다. 잠깐 뒤에 다시 뒤집어요.");
+
+  mismatch_timer_id = setTimeout(() => {
+    // 재시작 후에는 first_card / second_card가 null이 될 수 있으므로
+    // 카드가 실제로 남아 있는지 먼저 확인합니다.
+    if (!first_card || !second_card) {
+      mismatch_timer_id = null;
+      return;
+    }
+
+    hide_card(first_card);
+    hide_card(second_card);
+    set_message("다시 같은 그림을 찾아보세요.");
+    reset_selected_cards();
+    mismatch_timer_id = null;
+  }, 700);
+}
+
+function handle_second_selection(card_element) {
+  // 두 번째 카드를 선택했을 때 매칭 비교를 시작합니다.
+  second_card = card_element;
+  attempt_count += 1;
+  update_attempt_count();
+  board_locked = true;
+
+  if (compare_cards()) {
+    handle_matched_pair();
+    return;
+  }
+
+  handle_mismatched_pair();
+}
+
+function handle_card_click(card_element) {
+  // 게임이 아직 시작되지 않았거나, 이미 맞춘 카드, 같은 카드 재클릭, 비교 중인 상태는 무시합니다.
+  if (!is_game_ready || board_locked || is_game_over || is_stage_transitioning || card_element === first_card || card_element.classList.contains("matched")) {
+    return;
+  }
+
+  reveal_card(card_element);
+
+  if (!first_card) {
+    // 첫 번째 카드가 아직 없다면 지금 카드를 저장합니다.
+    first_card = card_element;
+    return;
+  }
+
+  // 두 번째 카드까지 선택되면 비교 로직으로 넘어갑니다.
+  handle_second_selection(card_element);
+}
+
+function create_card_element(emoji) {
+  // 카드 1장을 버튼 요소로 만듭니다.
+  const card_element = document.createElement("button");
+  card_element.type = "button";
+  card_element.className = "card";
+  card_element.dataset.value = emoji;
+  card_element.setAttribute("aria-label", "카드");
+  card_element.disabled = true;
+
+  // 카드 안에 실제로 보여줄 그림을 넣습니다.
+  const emoji_element = document.createElement("span");
+  emoji_element.className = "emoji";
+  emoji_element.textContent = emoji;
+
+  card_element.appendChild(emoji_element);
+  card_element.addEventListener("click", () => handle_card_click(card_element));
+
+  return card_element;
+}
+
+function set_board_activity(is_active) {
+  // 보드 전체를 활성화하거나 비활성화합니다.
+  board_element.classList.toggle("inactive", !is_active);
+}
+
+function set_all_card_disabled(is_disabled) {
+  // 보드 안의 모든 카드를 한 번에 활성화하거나 비활성화합니다.
+  board_element.querySelectorAll(".card:not(.blank)").forEach((card_element) => {
+    card_element.disabled = is_disabled;
+  });
+}
+
+function pick_random_fruits() {
+  // 현재 난이도에 맞는 카드 쌍 개수만큼 무작위로 골라 사용합니다.
+  const shuffled_fruit_pool = shuffle_array(fruit_pool);
+  return shuffled_fruit_pool.slice(0, current_level_config.pair_count);
+}
+
+function create_card_emoji_list() {
+  // 선택된 과일을 2장씩 복제한 뒤, 홀수 칸이 있으면 빈 칸 1개를 추가합니다.
+  const card_list = shuffle_array([...active_fruit_list, ...active_fruit_list]);
+  if (current_level_config.blank_cell_count > 0) {
+    card_list.splice(Math.floor(Math.random() * (card_list.length + 1)), 0, null);
+  }
+
+  return card_list;
+}
+
+function render_board() {
+  // 현재 난이도에 맞는 칸 수로 보드를 다시 그립니다.
+  update_board_layout();
+  const shuffled_emoji_list = create_card_emoji_list();
+  board_element.innerHTML = "";
+
+  shuffled_emoji_list.forEach((emoji) => {
+    if (emoji === null) {
+      const blank_card_element = document.createElement("button");
+      blank_card_element.type = "button";
+      blank_card_element.className = "card blank";
+      blank_card_element.setAttribute("aria-hidden", "true");
+      blank_card_element.disabled = true;
+      blank_card_element.tabIndex = -1;
+      board_element.appendChild(blank_card_element);
+      return;
+    }
+
+    const card_element = create_card_element(emoji);
+    board_element.appendChild(card_element);
+  });
+}
+
+function prepare_game(show_intro = true) {
+  // 새로고침이나 다시 시작을 눌렀을 때는 보드만 준비하고 바로 시작하지 않습니다.
+  clear_all_timers();
+  current_level_config = get_level_config();
+  sync_stage_selector();
+  is_game_over = false;
+  is_stage_transitioning = false;
+  set_game_phase(show_intro ? "intro" : "playing");
+
+  first_card = null;
+  second_card = null;
+  board_locked = true;
+  is_game_ready = false;
+  attempt_count = 0;
+  matched_pairs = 0;
+  update_attempt_count();
+  time_remaining_sec = current_level_config.time_limit_sec;
+  update_time_remaining();
+  set_message(
+    show_intro
+      ? `${current_level_config.label} 단계입니다. 게임 시작 버튼을 눌러주세요.`
+      : `${current_level_config.label} 단계 준비 완료!`,
+  );
+
+  active_fruit_list = pick_random_fruits();
+  render_board();
+  set_board_activity(false);
+  set_all_card_disabled(true);
+  clear_preview_state();
+}
+
+function clear_preview_state() {
+  // 프리뷰가 끝나면 모든 카드를 다시 숨긴 상태로 정리합니다.
+  board_element.querySelectorAll(".card.previewing").forEach((card_element) => {
+    card_element.classList.remove("previewing");
+    card_element.classList.remove("flipped");
+  });
+
+  board_element.classList.remove("previewing");
+}
+
+function start_preview_sequence() {
+  // 카드들을 순서대로 잠깐씩 보여줍니다.
+  if (is_game_over) {
+    return;
+  }
+
+  const card_elements = Array.from(board_element.querySelectorAll(".card:not(.blank)"));
+  const preview_duration_ms = Math.max(
+    current_level_config.preview_duration_ms,
+    (card_elements.length * current_level_config.preview_step_ms) + 500,
+  );
+
+  board_locked = true;
+  is_game_ready = false;
+  set_board_activity(true);
+  set_all_card_disabled(true);
+  set_message(`${current_level_config.label} 난이도입니다. 카드 위치를 기억해 보세요.`);
+  board_element.classList.add("previewing");
+
+  card_elements.forEach((card_element, index) => {
+    const timer_id = setTimeout(() => {
+      if (!board_element.contains(card_element)) {
+        return;
+      }
+
+      card_element.classList.add("previewing");
+      reveal_card(card_element);
+    }, index * current_level_config.preview_step_ms);
+
+    preview_timer_ids.push(timer_id);
+  });
+
+  preview_end_timer_id = setTimeout(() => {
+    clear_preview_state();
+    set_all_card_disabled(false);
+    is_game_ready = true;
+    board_locked = false;
+    set_message("같은 그림을 찾아서 짝을 맞춰보세요.");
+    start_countdown_timer();
+  }, preview_duration_ms);
+}
+
+function start_game() {
+  // 게임 시작 버튼을 눌렀을 때만 프리뷰를 보여주고 실제 게임을 시작합니다.
+  set_game_phase("playing");
+  prepare_game(false);
+  start_preview_sequence();
+}
+
+start_screen_button.addEventListener("click", start_game);
+start_button.addEventListener("click", start_game);
+restart_button.addEventListener("click", () => {
+  current_stage_index = 0;
+  prepare_game(true);
+});
+end_screen_button.addEventListener("click", () => {
+  current_stage_index = 0;
+  prepare_game(true);
+});
+level_select_element.disabled = true;
+
+// 페이지가 열리면 바로 보드를 준비하지만, 자동으로 시작하지는 않습니다.
+prepare_game(true);

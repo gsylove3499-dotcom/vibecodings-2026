@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>유튜브 학습 기록 앱</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <section class="hero">
+      <p class="eyebrow">Youtube Log</p>
+      <h1>유튜브 학습 기록 앱</h1>
+      <p class="lead">
+        학습한 유튜브 영상 URL을 저장하고, 완료 표시와 함께 다시 볼 수 있는 기록 앱입니다.
+      </p>
+    </section>
+
+    <section class="composer" aria-label="URL 입력">
+      <form id="logForm" class="log-form">
+        <label class="field">
+          <span class="field-label">유튜브 영상 URL</span>
+          <input
+            id="urlInput"
+            type="url"
+            inputmode="url"
+            placeholder="https://www.youtube.com/watch?v=..."
+            autocomplete="off"
+            spellcheck="false"
+            required
+          />
+        </label>
+        <button class="primary-btn" type="submit">목록에 저장</button>
+      </form>
+      <p class="hint" id="hintText">유튜브 영상 주소를 입력하고 저장해 보세요.</p>
+    </section>
+
+    <section class="stats" aria-label="기록 현황">
+      <div class="stat-card">
+        <span class="stat-label">전체</span>
+        <strong id="totalCount">0</strong>
+      </div>
+      <div class="stat-card done">
+        <span class="stat-label">완료</span>
+        <strong id="doneCount">0</strong>
+      </div>
+      <div class="stat-card pending">
+        <span class="stat-label">진행 중</span>
+        <strong id="pendingCount">0</strong>
+      </div>
+    </section>
+
+    <section class="list-section" aria-label="저장된 영상 목록">
+      <div class="list-header">
+        <h2>저장된 URL</h2>
+        <div class="list-actions">
+          <button class="ghost-btn" id="completeAllButton" type="button">전체 완료</button>
+          <button class="ghost-btn" id="clearAllButton" type="button">전체 삭제</button>
+        </div>
+      </div>
+
+      <div id="emptyState" class="empty-state">
+        아직 저장된 URL이 없습니다.
+      </div>
+
+      <ul id="logList" class="log-list"></ul>
+    </section>
+  </main>
+
+  <div class="modal-overlay hidden" id="deleteModal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="deleteModalTitle">
+      <h2 id="deleteModalTitle">정말로 삭제하시겠습니까?</h2>
+      <p>저장된 모든 URL이 삭제됩니다.</p>
+      <div class="modal-actions">
+        <button class="modal-btn cancel" id="deleteCancelButton" type="button">취소</button>
+        <button class="modal-btn confirm" id="deleteConfirmButton" type="button">확인</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="./script.js"></script>
+</body>
+</html>

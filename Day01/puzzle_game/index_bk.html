@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>간단한 퍼즐 게임</title>
+  <style>
+    :root {
+      --bg: #f3f5f9;
+      --card-bg: #ffffff;
+      --board-bg: #f8fafc;
+      --tile: #bdf5cb;
+      --tile-border: #9cdcb0;
+      --text: #1f2937;
+      --subtext: #6b7280;
+      --primary: #2f6fed;
+      --primary-dark: #2159c8;
+      --success: #1f9d55;
+      --shadow: 0 20px 50px rgba(15, 23, 42, 0.12);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top, rgba(255, 255, 255, 0.95), transparent 45%),
+        linear-gradient(180deg, #f7f8fc 0%, #edf1f7 100%);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 16px;
+    }
+
+    .app {
+      width: min(100%, 430px);
+      background: var(--card-bg);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 28px 20px 22px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      letter-spacing: -0.04em;
+    }
+
+    .subtitle {
+      margin: 10px 0 0;
+      color: var(--subtext);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 18px 2px 16px;
+      flex-wrap: wrap;
+    }
+
+    .attempts {
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .restart {
+      border: none;
+      border-radius: 12px;
+      background: var(--primary);
+      color: #fff;
+      padding: 12px 16px;
+      font-size: 15px;
+      cursor: pointer;
+      transition: transform 0.15s ease, background 0.15s ease;
+      box-shadow: 0 10px 18px rgba(47, 111, 237, 0.18);
+    }
+
+    .restart:hover {
+      background: var(--primary-dark);
+      transform: translateY(-1px);
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      background: var(--board-bg);
+      padding: 6px;
+      border-radius: 22px;
+    }
+
+    .tile {
+      aspect-ratio: 1;
+      border: 1px solid var(--tile-border);
+      border-radius: 16px;
+      background: linear-gradient(180deg, #c8f7d3 0%, var(--tile) 100%);
+      display: grid;
+      place-items: center;
+      font-size: 30px;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      user-select: none;
+    }
+
+    .tile:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 18px rgba(31, 157, 85, 0.12);
+    }
+
+    .tile.revealed,
+    .tile.matched {
+      background: #e8fbef;
+      cursor: default;
+    }
+
+    .tile.matched {
+      border-color: #8dd9a5;
+    }
+
+    .tile span {
+      display: none;
+    }
+
+    .tile.revealed span,
+    .tile.matched span {
+      display: block;
+    }
+
+    .tile.revealed {
+      animation: pop 0.18s ease;
+    }
+
+    .message {
+      margin: 16px 6px 0;
+      text-align: center;
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      min-height: 22px;
+    }
+
+    .message.success {
+      color: var(--success);
+    }
+
+    @keyframes pop {
+      from {
+        transform: scale(0.96);
+      }
+      to {
+        transform: scale(1);
+      }
+    }
+
+    @media (max-width: 420px) {
+      .app {
+        padding: 22px 14px 18px;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .tile {
+        font-size: 26px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <h1>간단한 퍼즐 게임</h1>
+      <p class="subtitle">같은 그림 2개를 찾아 모두 맞추면 클리어입니다.</p>
+    </header>
+
+    <section class="topbar" aria-label="게임 정보">
+      <div class="attempts">시도 횟수: <span id="attemptCount">0</span></div>
+      <button class="restart" id="restartBtn" type="button">다시 시작</button>
+    </section>
+
+    <section class="board" id="board" aria-label="퍼즐 보드"></section>
+
+    <p class="message" id="message">카드를 눌러 게임을 시작해 보세요.</p>
+  </main>
+
+  <script>
+    // 퍼즐 카드에 사용할 그림들입니다.
+    const card_values = ["🍇", "🍓", "🥝", "🍎", "🍉", "🍑", "🍒", "🍍"];
+
+    // 화면 요소를 미리 가져와 두면 나중에 반복해서 찾지 않아도 됩니다.
+    const board_el = document.getElementById("board");
+    const attempt_count_el = document.getElementById("attemptCount");
+    const restart_btn_el = document.getElementById("restartBtn");
+    const message_el = document.getElementById("message");
+
+    // 게임 상태를 담는 변수들입니다.
+    let card_list = [];
+    let first_selected_card = null;
+    let second_selected_card = null;
+    let is_board_locked = false;
+    let attempt_count = 0;
+    let matched_pair_count = 0;
+
+    // 배열의 순서를 무작위로 섞는 함수입니다.
+    // 같은 카드가 항상 같은 위치에 나오지 않도록 도와줍니다.
+    function shuffle_array(array) {
+      const copied_array = [...array];
+
+      // 뒤에서부터 하나씩 위치를 바꿔 주는 Fisher-Yates 방식입니다.
+      for (let current_index = copied_array.length - 1; current_index > 0; current_index -= 1) {
+        const random_index = Math.floor(Math.random() * (current_index + 1));
+        [copied_array[current_index], copied_array[random_index]] = [copied_array[random_index], copied_array[current_index]];
+      }
+
+      return copied_array;
+    }
+
+    // 화면 아래 안내 문구를 바꿉니다.
+    function set_message(text, is_success = false) {
+      message_el.textContent = text;
+      message_el.className = is_success ? "message success" : "message";
+    }
+
+    // 시도 횟수 숫자를 화면에 반영합니다.
+    function update_attempt_count() {
+      attempt_count_el.textContent = String(attempt_count);
+    }
+
+    // 카드 8개를 2장씩 복제해서 총 16장으로 만듭니다.
+    // 카드 하나는 id, 그림, 공개 여부, 매칭 여부를 가집니다.
+    function create_card_list() {
+      const shuffled_values = shuffle_array([...card_values, ...card_values]);
+
+      card_list = shuffled_values.map((value, index) => {
+        return {
+          id: index,
+          value,
+          revealed: false,
+          matched: false,
+        };
+      });
+    }
+
+    // 카드 상태를 보고 보드를 다시 그립니다.
+    // revealed 또는 matched 상태인 카드만 그림이 보입니다.
+    function render_board() {
+      board_el.innerHTML = "";
+
+      card_list.forEach((card) => {
+        const card_button = create_card_button(card);
+        board_el.appendChild(card_button);
+      });
+    }
+
+    // 카드 한 장을 화면에 그릴 버튼 요소로 만듭니다.
+    function create_card_button(card) {
+      const card_button = document.createElement("button");
+      card_button.type = "button";
+      card_button.className = "tile";
+      card_button.dataset.id = String(card.id);
+      card_button.setAttribute("aria-label", "숨겨진 카드");
+
+      apply_card_state(card_button, card);
+      card_button.innerHTML = `<span>${card.value}</span>`;
+
+      return card_button;
+    }
+
+    // 카드 상태에 따라 버튼 모양과 접근성 라벨을 바꿉니다.
+    function apply_card_state(card_button, card) {
+      if (card.revealed) {
+        card_button.classList.add("revealed");
+        card_button.setAttribute("aria-label", `열린 카드 ${card.value}`);
+      }
+
+      if (card.matched) {
+        card_button.classList.add("matched");
+        card_button.setAttribute("aria-label", `맞춘 카드 ${card.value}`);
+      }
+    }
+
+    // 선택한 두 카드를 비우고 다음 입력을 받을 준비를 합니다.
+    function reset_selection() {
+      first_selected_card = null;
+      second_selected_card = null;
+      is_board_locked = false;
+    }
+
+    // 모든 카드 쌍을 맞췄는지 확인합니다.
+    // 다 맞췄다면 클리어 메시지를 보여줍니다.
+    function check_clear() {
+      if (matched_pair_count === card_values.length) {
+        set_message(`축하합니다! ${attempt_count}번 만에 모두 맞췄습니다.`, true);
+      }
+    }
+
+    // 두 카드가 서로 다를 때의 처리입니다.
+    // 잠시 보여준 뒤 다시 뒤집어 사용자가 기억할 시간을 줍니다.
+    function handle_mismatch() {
+      setTimeout(() => {
+        hide_selected_cards();
+        render_board();
+        reset_selection();
+        set_message("다시 한 번 맞춰 보세요.");
+      }, 700);
+    }
+
+    // 두 카드가 서로 다를 때 다시 감추는 처리입니다.
+    function hide_selected_cards() {
+      first_selected_card.revealed = false;
+      second_selected_card.revealed = false;
+    }
+
+    // 두 카드가 같을 때의 처리입니다.
+    // 맞춘 카드는 계속 보이도록 고정하고, 매칭 개수를 올립니다.
+    function handle_match() {
+      mark_selected_cards_as_matched();
+      matched_pair_count += 1;
+      render_board();
+      reset_selection();
+      set_message("정답입니다!");
+      check_clear();
+    }
+
+    // 선택한 두 카드를 맞춘 상태로 바꿉니다.
+    function mark_selected_cards_as_matched() {
+      first_selected_card.matched = true;
+      second_selected_card.matched = true;
+    }
+
+    // 카드 id를 이용해 실제 카드 데이터를 찾습니다.
+    function find_card_by_id(card_id) {
+      return card_list.find((card) => card.id === card_id);
+    }
+
+    // 카드가 클릭 가능한 상태인지 확인합니다.
+    // 이미 열렸거나 맞춘 카드는 다시 선택할 수 없습니다.
+    function is_card_selectable(card) {
+      return Boolean(card) && !card.revealed && !card.matched;
+    }
+
+    // 사용자가 카드를 클릭했을 때 실행되는 메인 로직입니다.
+    function handle_card_click(card_id) {
+      if (is_board_locked) {
+        return;
+      }
+
+      const clicked_card = find_card_by_id(card_id);
+
+      if (!is_card_selectable(clicked_card)) {
+        return;
+      }
+
+      reveal_card(clicked_card);
+      render_board();
+
+      if (!first_selected_card) {
+        first_selected_card = clicked_card;
+        set_message("두 번째 카드를 골라보세요.");
+        return;
+      }
+
+      second_selected_card = clicked_card;
+      increase_attempt_count();
+      is_board_locked = true;
+
+      if (first_selected_card.value === second_selected_card.value) {
+        handle_match();
+        return;
+      }
+
+      set_message("틀렸습니다. 잠시 뒤 다시 뒤집힙니다.");
+      handle_mismatch();
+    }
+
+    // 카드를 펼치는 작은 함수입니다.
+    function reveal_card(card) {
+      card.revealed = true;
+    }
+
+    // 시도 횟수를 1 올리고 화면도 갱신합니다.
+    function increase_attempt_count() {
+      attempt_count += 1;
+      update_attempt_count();
+    }
+
+    // 새 게임을 시작할 때 모든 상태를 초기화합니다.
+    function start_game() {
+      attempt_count = 0;
+      matched_pair_count = 0;
+      update_attempt_count();
+      set_message("카드를 눌러 게임을 시작해 보세요.");
+      create_card_list();
+      reset_selection();
+      render_board();
+    }
+
+    // 보드 전체에서 클릭을 한 번에 처리합니다.
+    board_el.addEventListener("click", (event) => {
+      const tile_button = event.target.closest(".tile");
+
+      if (!tile_button) {
+        return;
+      }
+
+      handle_card_click(Number(tile_button.dataset.id));
+    });
+
+    // 다시 시작 버튼을 누르면 새 게임을 시작합니다.
+    restart_btn_el.addEventListener("click", start_game);
+
+    // 처음 화면이 열리면 바로 게임을 준비합니다.
+    start_game();
+  </script>
+</body>
+</html>
