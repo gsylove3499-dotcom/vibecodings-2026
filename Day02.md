@@ -107,8 +107,6 @@ Day02의 puzzle_game 폴더에 있는 파일을 수정할꺼야.
 
 - 오른쪽 상단 Add New... > Project 선택 > Import 선택 > 프로젝트 명 입력 > 폴더 경로 입력 > Deploy 클릭
 
-- 
-
 - Vercel 가입, 등록, 배포
 
 #### 5. 추가 내용
